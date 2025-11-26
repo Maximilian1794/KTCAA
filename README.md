@@ -1,4 +1,3 @@
-<p align="center">1. School of Informatics, Xiamen University &nbsp; <br> 2. School of Electronic Science and Engineering, Xiamen University &nbsp; <br> 3. Institute of Artificial Intelligence, Xiamen University
 </p><h2 align="center">A Theory-Inspired Framework for Few-Shot Cross-Modal Sketch Person Re-Identification
 </h2>
 
@@ -67,4 +66,5 @@ If you find our work helpful, please consider citing our work using the followin
   year={2026},
 }
 ```
+
 
