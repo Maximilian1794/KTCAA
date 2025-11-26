@@ -59,13 +59,14 @@ Our code was build on the amazing codebase <a href="https://github.com/Lin-Kayla
 ## Citation
 If you find our work helpful, please consider citing our work using the following bibtex.
 ```
-@inproceedings{gong2026,
+@article{gong2026theory,
   title={A Theory-Inspired Framework for Few-Shot Cross-Modal Sketch Person Re-Identification},
-  author={Yunpeng Gong, Yongjie Hou, Jiangming Shi, Kim Long Diep, Min Jiang},
-  booktitle={AAAI},
-  year={2026},
+  author={Gong, Yunpeng and Hou, Yongjie and Shi, Jiangming and DIEP, KL and Jiang, Min},
+  booktitle={Proceedings of the AAAI Conference on Artificial Intelligence},
+  year={2026}
 }
 ```
+
 
 
 
