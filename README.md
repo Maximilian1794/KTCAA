@@ -51,7 +51,7 @@ python test.py \
  - `<train_style>` should be replaced with the styles you used for your training.
  - `<test_style>` should be replaced with the styles you want to use for your testing.
  - `<model_filename>` should be the filename of your trained model.
- - `[--test_mq]` argument is used for enabling multi-query during testing.
+
 
 ## Acknowledgements
 Our code was build on the amazing codebase <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid">subjectivity-sketch-reid</a> and <a href="https://github.com/openai/CLIP.git">CLIP</a>. 
@@ -66,6 +66,7 @@ If you find our work helpful, please consider citing our work using the followin
   year={2026}
 }
 ```
+
 
 
 
