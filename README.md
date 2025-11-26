@@ -1,4 +1,4 @@
-This is the code for 《A Theory-Inspired Framework for Few-Shot Cross-Modal Sketch Person Re-Identification》
+
 
 
 ## Dataset
@@ -66,6 +66,7 @@ If you find our work helpful, please consider citing our work using the followin
   year={2026}
 }
 ```
+
 
 
 
