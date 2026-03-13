@@ -63,6 +63,16 @@ python test.py \
  - `<model_filename>` should be the filename of your trained model.
  - `[--test_mq]` argument is used for enabling multi-query during testing.
 
+### Visualization
+```python
+python test_topk.py 
+```
+
+<div align="center">
+<img src="./test_topk.jpg" alt="teaser"></image>
+</div>
+
+
 ## Acknowledgements
 This code provides a comparison with the <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid">ssreid (subjectivity-sketch-reid)</a> with <a href="https://github.com/openai/CLIP.git">CLIP</a>. 
 
@@ -81,6 +91,7 @@ If you find our work helpful, please consider citing our work using the followin
 ## Contact Me
 
 Email: 1286670508@qq.com
+
 
 
 
