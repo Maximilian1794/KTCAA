@@ -23,7 +23,7 @@ download the necessary dependencies using cmd.
 pip install -r requirements.txt
 ```
 
-### preprocess
+### Preprocess
 ```python
 python preprocess.py \
   --data_path=<data_path> \
@@ -35,7 +35,7 @@ python preprocess.py \
  - `<train_style>` refers to the styles you want to include in your training set. You can use any combination of styles A-F, such as B, AC, CEF, and so on.
 -  `[--train_mq]` argument is optional and can be used to enable multi-query during training.
 
-### start training
+### Start training
 ```
 python train.py \
   --meta_train_data_path=<market1501_dataset_path> \
@@ -81,6 +81,7 @@ If you find our work helpful, please consider citing our work using the followin
 ## Contact Me
 
 Email: 1286670508@qq.com
+
 
 
 
