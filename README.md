@@ -17,7 +17,7 @@ Download <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid">MaSk1K 
 
 ## Guide For Meta Learning
 
-### requirements
+### Requirements
 download the necessary dependencies using cmd.
 ```bash
 pip install -r requirements.txt
@@ -81,6 +81,7 @@ If you find our work helpful, please consider citing our work using the followin
 ## Contact Me
 
 Email: 1286670508@qq.com
+
 
 
 
