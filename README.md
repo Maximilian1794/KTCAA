@@ -15,7 +15,7 @@
 
 Download <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid">MaSk1K dataset</a> (Short for <u>Ma</u>rket-<u>Sk</u>etch-<u>1K</u>), <a href="https://zheng-lab-anu.github.io/Project/project_reid.html">Market1501 dataset</a>, and <a href="https://github.com/vana77/Market-1501_Attribute.git">Market1501 attributes</a>. Put MaSk1K and Market1501 separately into your \<data_path\>.
 
-## Guide For Meta Learning
+## Guidence
 
 ### Requirements
 download the necessary dependencies using cmd.
@@ -81,6 +81,7 @@ If you find our work helpful, please consider citing our work using the followin
 ## Contact Me
 
 Email: 1286670508@qq.com
+
 
 
 
