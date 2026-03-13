@@ -7,7 +7,9 @@
 <p align="center">1. School of Informatics, Xiamen University &nbsp; <br> 2. School of Electronic Science and Engineering, Xiamen University &nbsp; <br> 3. Institute of Artificial Intelligence, Xiamen University
 </p>
 
-
+<div align="center">
+<img src="./assets/1.png" alt="teaser"></image>
+</div>
 
 ## Dataset
 
@@ -79,6 +81,7 @@ If you find our work helpful, please consider citing our work using the followin
 ## Contact Me
 
 Email: 1286670508@qq.com
+
 
 
 
