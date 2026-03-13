@@ -72,7 +72,7 @@ If you find our work helpful, please consider citing our work using the followin
 @inproceedings{gong2026,
   title={A Theory-Inspired Framework for Few-Shot Cross-Modal Sketch Person Re-Identification},
   author={Yunpeng Gong, Yongjie Hou, Jiangming Shi, Kim Long Diep, Min Jiang},
-  booktitle={AAAI},
+  booktitle={Proceedings of the AAAI Conference on Artificial Intelligence},
   year={2026},
 }
 ```
@@ -81,6 +81,7 @@ If you find our work helpful, please consider citing our work using the followin
 ## Contact Me
 
 Email: 1286670508@qq.com
+
 
 
 
