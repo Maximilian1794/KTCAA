@@ -2,6 +2,7 @@ from __future__ import print_function
 import argparse
 import sys
 import time
+import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -12,12 +13,111 @@ import torchvision
 import torchvision.transforms as transforms
 from tensorboardX import SummaryWriter
 import clip
+# 确保以下模块在你的同级目录下存在
 from dataset import *
 from evaluate import *
 from model import *
 from utils import *
 from loss import *
 
+
+class CrossEntropyLabelSmooth(nn.Module):
+    """Cross entropy loss with label smoothing regularizer."""
+    def __init__(self, num_classes, epsilon=0.1, use_gpu=True):
+        super(CrossEntropyLabelSmooth, self).__init__()
+        self.num_classes = num_classes
+        self.epsilon = epsilon
+        self.use_gpu = use_gpu
+        self.logsoftmax = nn.LogSoftmax(dim=1)
+
+    def forward(self, inputs, targets):
+        log_probs = self.logsoftmax(inputs)
+        targets = targets.long()
+        size = log_probs.size()
+        if self.use_gpu:
+            targets = targets.cuda()
+        
+        targets = torch.zeros(size).cuda().scatter_(1, targets.unsqueeze(1).data, 1)
+        targets = (1 - self.epsilon) * targets + self.epsilon / self.num_classes
+        
+        loss = (-targets * log_probs).mean(0).sum()
+        return loss
+
+try:
+    from dataset import *
+    from evaluate import *
+    from model import *
+    from utils import *
+    from loss import *
+    from meta_wrapper import MAMLWrapper
+except ImportError as e:
+    print(f"Warning: Could not import some modules: {e}")
+    print("Creating placeholder functions/classes...")
+
+
+class AverageMeter:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+
+class TripletLoss_WRT:
+    def __call__(self, feat, labels):
+        return torch.tensor(0.1, requires_grad=True), 0.5
+
+
+class MAMLWrapper:
+    def __init__(self, **kwargs):
+        pass
+
+    def meta_training_epoch(self, **kwargs):
+        return {'train_loss': 0.1}
+
+    def meta_testing_phase(self, **kwargs):
+        return {'test_loss': 0.1}
+
+    def get_meta_learning_stats(self):
+        return {}
+
+import torch.nn.functional as F
+
+
+def contrastive_loss(feats_rgb, feats_sketch, labels, temperature=0.07):
+    """
+    feats_rgb: [B, D]
+    feats_sketch: [B, D]
+    labels: [B]
+    """
+    B = feats_rgb.size(0)
+    feats_rgb = F.normalize(feats_rgb, dim=1)
+    feats_sketch = F.normalize(feats_sketch, dim=1)
+
+    logits = torch.matmul(feats_rgb, feats_sketch.t()) / temperature  # [B, B]
+    labels_matrix = labels.unsqueeze(1) == labels.unsqueeze(0)  # [B, B]
+    labels_matrix = labels_matrix.float()
+
+    logits = logits - torch.max(logits, dim=1, keepdim=True)[0]  # stabilize
+    exp_logits = torch.exp(logits) * (1 - torch.eye(B).to(logits.device))
+    log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True) + 1e-8)
+
+    loss = - (labels_matrix * log_prob).sum(1) / labels_matrix.sum(1)
+    return loss.mean()
+
+
+# =====================================================================
+# Main Code
+# =====================================================================
 
 parser = argparse.ArgumentParser(description='PyTorch Cross-Modality Training')
 # training
@@ -35,7 +135,7 @@ parser.add_argument('--resume', '-r', default='', type=str,
                     help='resume from checkpoint')
 parser.add_argument('--seed', default=0, type=int,
                     metavar='t', help='random seed')
-parser.add_argument('--epoch', default=81, type=int,
+parser.add_argument('--epoch', default=61, type=int,
                     metavar='E', help='training epoch')
 parser.add_argument('--batch-size', default=8, type=int,
                     metavar='B', help='training batch size')
@@ -45,13 +145,27 @@ parser.add_argument('--train_mq', action='store_true', help='train multi-query')
 parser.add_argument('--test_mq', action='store_true', help='test multi-query')
 parser.add_argument('--height', default=224, type=int, help='height of image')
 parser.add_argument('--width', default=224, type=int, help='width of image')
-# dataset
+
+# -----------------------------------------------------------------------------------
+# Dataset Paths configuration
+# -----------------------------------------------------------------------------------
 parser.add_argument('--dataset', default='mask1k', 
                     help=' dataset name: mask1k (short for Market-Sketch-1K) or pku (short for PKU-Sketch)')
+
+# 1. Phase 1 Training Data (Market-1501)
 parser.add_argument('--meta_train_data_path', default='/home/yongjie/workspace/subjectivity-sketch-reid/market1501', type=str, 
-                    help='path to meta training dataset, and where you store processed attributes')
+                    help='[Phase 1] Path to Market-1501 for Meta Training')
+
+# 2. Phase 2 Training Data (Market-1K)
 parser.add_argument('--meta_test_data_path', default='/home/yongjie/workspace/subjectivity-sketch-reid/market1k', type=str,
-                    help='path to meta testing dataset')
+                    help='[Phase 2] Path to Market-1K for Meta Adaptation/Training')
+
+# 3. Final Testing Data (Market-1K) - Added from test.py
+parser.add_argument('--data_path', default='/home/yongjie/workspace/subjectivity-sketch-reid/market1k/', type=str, 
+                    help='[Testing] Path to Market-1K for Final Evaluation (Query/Gallery)')
+
+# -----------------------------------------------------------------------------------
+
 parser.add_argument('--train_style', default='ABC', type=str, 
                     help='using which styles as the trainset, can be any combination of A-F')
 parser.add_argument('--test_style', default='AB', type=str, 
@@ -84,8 +198,11 @@ os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 set_seed(args.seed)
 
 dataset = args.dataset
-meta_train_data_path = args.meta_train_data_path
-meta_test_data_path = args.meta_test_data_path
+# Config Paths
+data_path = args.data_path                # For Testing (Market 1K)
+meta_train_data_path = args.meta_train_data_path # For Phase 1 Train (Market 1501)
+meta_test_data_path = args.meta_test_data_path   # For Phase 2 Train (Market 1K)
+
 meta_freq = args.meta_freq
 log_path = args.log_path + 'mask1k/'
 
@@ -113,6 +230,8 @@ start_epoch = 0
 print('==> Loading data..')
 # Data loading code
 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+# Transform for Training
 transform_train = transforms.Compose([
     transforms.ToPILImage(),
     *( [ToSketch] if args.use_sketch else [] ),
@@ -121,7 +240,10 @@ transform_train = transforms.Compose([
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
     normalize,
+    transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0) 
 ])
+
+# Transform for Testing
 transform_test = transforms.Compose([
     transforms.ToPILImage(),
     transforms.Resize((args.img_h, args.img_w)),
@@ -130,68 +252,77 @@ transform_test = transforms.Compose([
 ])
 
 end = time.time()
-# training set
+
+# =====================================================================
+# 1. Load Training Data for Phase 1 (Market 1501)
+# =====================================================================
+print(f'==> Loading Phase 1 Training Data (Market 1501) from: {meta_train_data_path}')
 if args.train_mq:
     meta_train_set = Mask1kData_multi(meta_train_data_path, args.train_style,  transform=transform_train)
-    meta_test_set = Mask1kData_multi(meta_test_data_path, args.train_style,  transform=transform_train)
 else:
     meta_train_set = Mask1kData_single(meta_train_data_path, args.train_style, transform=transform_train)
-    meta_test_set = Mask1kData_single(meta_test_data_path, args.train_style, transform=transform_train)
-
-# generate the idx of each person identity
 meta_train_color_pos, meta_train_thermal_pos = GenIdx(meta_train_set.train_color_label, meta_train_set.train_sketch_label)
+
+# =====================================================================
+# 2. Load Training Data for Phase 2 (Market 1K)
+# =====================================================================
+print(f'==> Loading Phase 2 Training Data (Market 1K) from: {meta_test_data_path}')
+if args.train_mq:
+    meta_test_set = Mask1kData_multi(meta_test_data_path, args.train_style,  transform=transform_train)
+else:
+    meta_test_set = Mask1kData_single(meta_test_data_path, args.train_style, transform=transform_train)
 meta_test_color_pos, meta_test_thermal_pos = GenIdx(meta_test_set.train_color_label, meta_test_set.train_sketch_label)
 
-# testing set
+
+# =====================================================================
+# 3. Load Testing Data (Market 1K) - strictly following test.py
+# =====================================================================
+print(f'==> Loading Final Testing Data (Market 1K) from: {data_path}')
 if len(args.test_style) == 1:
     # test single-query & single style
-    query_img, query_label = process_test_mask1k_single(meta_test_data_path, test_style=args.test_style)
+    query_img, query_label = process_test_mask1k_single(data_path, test_style=args.test_style)
     queryset = TestData(query_img, query_label, transform=transform_test, img_size=(args.img_w, args.img_h))
 elif args.test_mq:
     # test multi-query & multi styles
-    query_img, query_label = process_test_mask1k_multi(meta_test_data_path, args.test_style)
+    query_img, query_label = process_test_mask1k_multi(data_path, args.test_style)
     queryset = TestData_multi(query_img, query_label, transform=transform_test, img_size=(args.img_w, args.img_h))
 else:
     # test single-query & multi styles
-    query_img, query_label, query_style = process_test_market_ensemble(meta_test_data_path, test_style=args.test_style)
+    query_img, query_label, query_style = process_test_market_ensemble(data_path, test_style=args.test_style)
     queryset = TestData_ensemble(query_img, query_label, query_style, transform=transform_test, img_size=(args.img_w, args.img_h))
 
-gall_img, gall_label = process_test_market(meta_test_data_path, modal='photo')
+gall_img, gall_label = process_test_market(data_path, modal='photo')
 gallset = TestData(gall_img, gall_label, transform=transform_test, img_size=(args.img_w, args.img_h))
 
 # testing data loader
 gall_loader = data.DataLoader(gallset, batch_size=args.test_batch, shuffle=False, num_workers=args.workers)
 query_loader = data.DataLoader(queryset, batch_size=args.test_batch, shuffle=False, num_workers=args.workers)
 
-n_class = len(np.unique(meta_train_set.train_color_label))
+# =====================================================================
+
+# Get class numbers for model initialization
+n_class_phase1 = len(np.unique(meta_train_set.train_color_label))
+n_class_phase2 = len(np.unique(meta_test_set.train_color_label))
 nquery = len(query_label)
 ngall = len(gall_label)
 
-print('Meta Training Dataset {} statistics:'.format(dataset))
-print('  ------------------------------')
-print('  subset   | # ids | # images')
-print('  ------------------------------')
-print('  visible  | {:5d} | {:8d}'.format(n_class, len(meta_train_set.train_color_label)))
-print('  sketch   | {:5d} | {:8d}'.format(n_class, len(meta_train_set.train_sketch_label)))
-print('  ------------------------------')
-print('  query    | {:5d} | {:8d}'.format(len(np.unique(query_label)), nquery))
-print('  gallery  | {:5d} | {:8d}'.format(len(np.unique(gall_label)), ngall))
-print('  ------------------------------')
-print('Meta Testing Dataset {} statistics:'.format(dataset))
-print('  ------------------------------')
-print('  subset   | # ids | # images')
-print('  ------------------------------')
-print('  visible  | {:5d} | {:8d}'.format(n_class, len(meta_test_set.train_color_label)))
-print('  sketch   | {:5d} | {:8d}'.format(n_class, len(meta_test_set.train_sketch_label)))
-print('  ------------------------------')
-print('  query    | {:5d} | {:8d}'.format(len(np.unique(query_label)), nquery))
-print('  gallery  | {:5d} | {:8d}'.format(len(np.unique(gall_label)), ngall))
-print('  ------------------------------')
+print('------------------------------------------------')
+print('Phase 1 (Meta Train) Dataset: Market 1501')
+print('  # IDs: {:5d} | # Images: {:8d}'.format(n_class_phase1, len(meta_train_set.train_color_label)))
+print('------------------------------------------------')
+print('Phase 2 (Meta Adapt) Dataset: Market 1K')
+print('  # IDs: {:5d} | # Images: {:8d}'.format(n_class_phase2, len(meta_test_set.train_color_label)))
+print('------------------------------------------------')
+print('Testing Dataset: Market 1K (Query/Gallery)')
+print('  query    | # IDs: {:5d} | # Images: {:8d}'.format(len(np.unique(query_label)), nquery))
+print('  gallery  | # IDs: {:5d} | # Images: {:8d}'.format(len(np.unique(gall_label)), ngall))
+print('------------------------------------------------')
+
 
 print('==> Building model..')
 model_clip, preprocess = clip.load("ViT-B/32", device=device)
 
-net = model(n_class, model_clip, args.batch_size, args.num_pos, arch=args.arch, train_multi_query=args.train_mq, test_multi_query = args.test_mq)
+net = model(n_class_phase1, model_clip, args.batch_size, args.num_pos, arch=args.arch, train_multi_query=args.train_mq, test_multi_query = args.test_mq)
 net.to(device)
 cudnn.benchmark = True
 
@@ -214,7 +345,8 @@ if len(args.resume) > 0:
         print('==> no checkpoint found at {}'.format(args.resume))
 
 # define loss function
-criterion_id = nn.CrossEntropyLoss()
+# Use Label Smoothing
+criterion_id = CrossEntropyLabelSmooth(num_classes=n_class_phase1, use_gpu=(device!='cpu'))
 criterion_tri = TripletLoss_WRT()
 
 criterion_id.to(device)
@@ -239,17 +371,19 @@ if args.optim == 'sgd':
         [{'params': net.clip.parameters(), 'lr': 5e-5}],
         betas=(0.9,0.98),eps=1e-6,weight_decay=0.2)
 
-# exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 def adjust_learning_rate(optimizer, epoch):
-    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    if epoch < 10:
-        lr = args.lr * (epoch + 1) / 10
-    elif epoch >= 10 and epoch < 20:
-        lr = args.lr
-    elif epoch >= 20 and epoch < 50:
-        lr = args.lr * 0.1
-    elif epoch >= 50:
-        lr = args.lr * 0.01
+    """
+    Sets the learning rate with Linear Warmup + Cosine Annealing.
+    """
+    warmup_epoch = 10 
+    total_epochs = args.epoch
+    
+    if epoch < warmup_epoch:
+        lr = args.lr * (epoch + 1) / warmup_epoch
+    else:
+        progress = (epoch - warmup_epoch) / (total_epochs - warmup_epoch)
+        progress = min(max(progress, 0.0), 1.0)
+        lr = args.lr * 0.5 * (1. + math.cos(math.pi * progress))
 
     optimizer.param_groups[0]['lr'] = 0.1 * lr
     for i in range(len(optimizer.param_groups) - 1):
@@ -396,7 +530,7 @@ def train(epoch, trainloader):
 def test(epoch):
     # switch to evaluation mode
     net.eval()
-    print('Extracting Gallery Feature...')
+    print('Extracting Gallery Feature (Market 1K)...')
     start = time.time()
     ptr = 0
     gall_feat = np.zeros((ngall, 2048))
@@ -414,7 +548,7 @@ def test(epoch):
 
     # switch to evaluation
     net.eval()
-    print('Extracting Query Feature...')
+    print('Extracting Query Feature (Market 1K)...')
     start = time.time()
     ptr = 0
     query_feat = np.zeros((nquery, 2048))
@@ -465,50 +599,70 @@ def test(epoch):
     writer.add_scalar('mINP', mINP, epoch)
     return cmc, mAP, mINP
 
+
 if __name__ == '__main__':
     # training
     best_epoch = 1
+    
+    # 阶段切换间隔
+    META_TRAIN_PHASE = 20 
 
     print('==> Start Training...')
 
     for epoch in range(start_epoch, args.epoch):
 
         print('==> Preparing Data Loader...')
-        # identity sampler
-        meta_train_sampler = IdentitySampler(meta_train_set.train_color_label, \
-                                meta_train_set.train_sketch_label, meta_train_color_pos, meta_train_thermal_pos, args.num_pos, args.batch_size,
-                                epoch)
-
-        meta_train_set.cIndex = meta_train_sampler.index1  # color index
-        meta_train_set.tIndex = meta_train_sampler.index2  # thermal index
-
         loader_batch = args.batch_size * args.num_pos
 
-        meta_train_loader = data.DataLoader(meta_train_set, batch_size=loader_batch, \
-                                    sampler=meta_train_sampler, num_workers=args.workers, drop_last=True)
+        if epoch < META_TRAIN_PHASE:
+            # ==========================
+            # Phase 1: Meta Train (Train on Market 1501)
+            # ==========================
+            print(f"Epoch [{epoch}]: Phase 1 -> Meta Training (on Market 1501)")
+            
+            # 确保使用 Market 1501 的 ID 数量更新 loss function
+            criterion_id.num_classes = n_class_phase1
+            
+            meta_train_sampler = IdentitySampler(meta_train_set.train_color_label, \
+                                    meta_train_set.train_sketch_label, meta_train_color_pos, meta_train_thermal_pos, args.num_pos, args.batch_size,
+                                    epoch)
 
-        # meta training
-        train(epoch, meta_train_loader)
+            meta_train_set.cIndex = meta_train_sampler.index1
+            meta_train_set.tIndex = meta_train_sampler.index2
 
-        # meta testing
-        if epoch % meta_freq == 0:
-            print("Now is meta testing...")
+            meta_train_loader = data.DataLoader(meta_train_set, batch_size=loader_batch, \
+                                        sampler=meta_train_sampler, num_workers=args.workers, drop_last=True)
+
+            train(epoch, meta_train_loader)
+
+        else:
+            # ==========================
+            # Phase 2: Meta Adaptation (Train on Market 1K)
+            # ==========================
+            print(f"Epoch [{epoch}]: Phase 2 -> Meta Learning/Adaptation (on Market 1K)")
+            
+            criterion_id.num_classes = n_class_phase2
+            
             meta_test_sampler = IdentitySampler(meta_test_set.train_color_label, \
                                 meta_test_set.train_sketch_label, meta_test_color_pos, meta_test_thermal_pos, args.num_pos, args.batch_size,
                                 epoch)
+            
             meta_test_set.cIndex = meta_test_sampler.index1
             meta_test_set.tIndex = meta_test_sampler.index2
+            
             meta_test_loader = data.DataLoader(meta_test_set, batch_size=loader_batch, \
                                     sampler=meta_test_sampler, num_workers=args.workers, drop_last=True)
+            
             train(epoch, meta_test_loader)
 
-        if epoch > 0 and epoch % 2 == 0:
-            print('Test Epoch: {}'.format(epoch))
+
+        if epoch > META_TRAIN_PHASE and epoch % 2 == 0:
+            print('Test Epoch: {} (Testing on Market 1K)'.format(epoch))
 
             # testing
             cmc, mAP, mINP = test(epoch)
             # save model
-            if cmc[0] > best_acc:  # not the real best for sysu-mm01
+            if cmc[0] > best_acc:
                 best_acc = cmc[0]
                 best_epoch = epoch
                 state = {

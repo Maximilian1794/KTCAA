@@ -1,11 +1,21 @@
+<h2 align="center">A Theory-Inspired Framework for Few-Shot Cross-Modal Sketch Person Re-Identification
+</h2>
 
+<p align="center"> Yunpeng Gong<sup>1</sup>, Yongjie Hou<sup>2</sup>, Jiangming Shi<sup>3</sup>, Kim Long Diep<sup>1</sup>, Min Jiang<sup>1,*</sup>
+</p>
 
+<p align="center">1. School of Informatics, Xiamen University &nbsp; <br> 2. School of Electronic Science and Engineering, Xiamen University &nbsp; <br> 3. Institute of Artificial Intelligence, Xiamen University
+</p>
+
+<div align="center">
+<img src="./assets/arch.png" alt="teaser"></image>
+</div>
 
 ## Dataset
 
 Download <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid">MaSk1K dataset</a> (Short for <u>Ma</u>rket-<u>Sk</u>etch-<u>1K</u>), <a href="https://zheng-lab-anu.github.io/Project/project_reid.html">Market1501 dataset</a>, and <a href="https://github.com/vana77/Market-1501_Attribute.git">Market1501 attributes</a>. Put MaSk1K and Market1501 separately into your \<data_path\>.
 
-## Instruction
+## Guide For Meta Learning
 
 ### requirements
 download the necessary dependencies using cmd.
@@ -51,12 +61,23 @@ python test.py \
  - `<train_style>` should be replaced with the styles you used for your training.
  - `<test_style>` should be replaced with the styles you want to use for your testing.
  - `<model_filename>` should be the filename of your trained model.
+ - `[--test_mq]` argument is used for enabling multi-query during testing.
+
+## Acknowledgements
+Our code was build on the amazing codebase <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid">subjectivity-sketch-reid</a> and <a href="https://github.com/openai/CLIP.git">CLIP</a>. 
+
+## Citation
+If you find our work helpful, please consider citing our work using the following bibtex.
+```
+@inproceedings{gong2026,
+  title={A Theory-Inspired Framework for Few-Shot Cross-Modal Sketch Person Re-Identification},
+  author={Yunpeng Gong, Yongjie Hou, Jiangming Shi, Kim Long Diep, Min Jiang},
+  booktitle={AAAI},
+  year={2026},
+}
+```
 
 
+## Contact Me
 
-
-
-
-
-
-
+Email: 1286670508@qq.com

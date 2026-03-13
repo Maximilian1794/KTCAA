@@ -12,12 +12,15 @@ import torchvision
 import torchvision.transforms as transforms
 from tensorboardX import SummaryWriter
 import clip
+import numpy as np
+import os
+
+# 导入自定义模块
 from dataset import *
 from evaluate import *
 from model import *
 from utils import *
 from loss import *
-
 
 parser = argparse.ArgumentParser(description='PyTorch Cross-Modality Training')
 # training
@@ -29,8 +32,6 @@ parser.add_argument('--vis_log_path', default='log/vis_log/', type=str,
                     help='log save path')
 parser.add_argument('--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--save_epoch', default=1, type=int,
-                    metavar='s', help='save model every 10 epochs')
 parser.add_argument('--resume', '-r', default='', type=str,
                     help='resume from checkpoint')
 parser.add_argument('--test-only', action='store_true', help='test only')
@@ -45,6 +46,7 @@ parser.add_argument('--test_mq', action='store_true', help='test multi-query')
 # dataset
 parser.add_argument('--dataset', default='mask1k', 
                     help=' dataset name: mask1k (short for Market-Sketch-1K) or pku (short for PKU-Sketch)')
+# [Updated] Default path set to your workspace
 parser.add_argument('--data_path', default='/home/yongjie/workspace/subjectivity-sketch-reid/market1k/', type=str, 
                     help='path to dataset, and where you store processed attributes')
 parser.add_argument('--train_style', default='ABC', type=str, 
@@ -90,16 +92,14 @@ if not os.path.isdir(args.vis_log_path):
     os.makedirs(args.vis_log_path)
 
 suffix = f'{args.dataset}_{args.train_style}_{args.test_style}'
-sys.stdout = Logger(log_path + suffix + '_os.txt')
+# Use a different log file for testing to avoid overwriting training logs
+sys.stdout = Logger(log_path + suffix + '_test_os.txt')
 vis_log_dir = args.vis_log_path + suffix + '/'
 os.makedirs(vis_log_dir, exist_ok=True)
 writer = SummaryWriter(vis_log_dir)
 
 print("==========\nArgs:{}\n==========".format(args))
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-best_acc = 0  # best test accuracy
-start_epoch = 0
 
 print('==> Loading data..')
 # Data loading code
@@ -120,14 +120,11 @@ transform_test = transforms.Compose([
 ])
 
 end = time.time()
-# training set
+# training set (Loaded only to calculate n_class and init model structure)
 if args.train_mq:
     trainset = Mask1kData_multi(data_path, args.train_style,  transform=transform_train)
 else:
     trainset = Mask1kData_single(data_path, args.train_style, transform=transform_train)
-
-# generate the idx of each person identity
-color_pos, thermal_pos = GenIdx(trainset.train_color_label, trainset.train_sketch_label)
 
 # testing set
 if len(args.test_style) == 1:
@@ -170,71 +167,45 @@ print('==> Building model..')
 model_clip, preprocess = clip.load("ViT-B/32", device=device)
 
 net = model(n_class, model_clip, args.batch_size, args.num_pos, arch=args.arch, train_multi_query=args.train_mq, test_multi_query = args.test_mq)
-# net = model(498, model_clip, args.batch_size, args.num_pos, arch=args.arch, train_multi_query=args.train_mq, test_multi_query = args.test_mq)
 net.to(device)
 cudnn.benchmark = True
 
-def convert_models_to_fp32(model):
-    for p in model.parameters():
-        p.data = p.data.float()
-        if p.grad is not None:
-            p.grad.data = p.grad.data.float()
-
+# =============================================================================
+# WEIGHT LOADING SECTION (Fixing the 1% accuracy issue)
+# =============================================================================
 if len(args.resume) > 0:
     model_path = checkpoint_path + args.resume
     if os.path.isfile(model_path):
         print('==> loading checkpoint {}'.format(args.resume))
         checkpoint = torch.load(model_path)
-        start_epoch = checkpoint['epoch']
-        net.load_state_dict(checkpoint['net'])
+        
+        # Robust loading: filter out mismatched keys (like classifier)
+        state_dict = checkpoint['net']
+        model_dict = net.state_dict()
+        
+        # 1. Keep keys that exist in both and have matching shapes
+        pretrained_dict = {k: v for k, v in state_dict.items() 
+                           if k in model_dict and v.size() == model_dict[k].size()}
+        
+        # 2. Print what is being ignored
+        ignored_keys = [k for k in state_dict.keys() if k not in pretrained_dict]
+        if len(ignored_keys) > 0:
+            print(f"Warning: {len(ignored_keys)} layers were ignored due to shape mismatch (e.g., classifier). This is expected for inference.")
+        
+        # 3. Update and load
+        model_dict.update(pretrained_dict)
+        net.load_state_dict(model_dict)
+        
         print('==> loaded checkpoint {} (epoch {})'
               .format(args.resume, checkpoint['epoch']))
     else:
-        print('==> no checkpoint found at {}'.format(args.resume))
-
-# define loss function
-criterion_id = nn.CrossEntropyLoss()
-criterion_tri = TripletLoss_WRT()
-
-criterion_id.to(device)
-criterion_tri.to(device)
-
-
-if args.optim == 'sgd':
-    ignored_params = list(map(id, net.bottleneck.parameters())) \
-                     + list(map(id, net.classifier.parameters())) \
-                        +list(map(id, net.clip.parameters())) \
-                            + list(map(id, net.cmalign.maskFc.parameters()))
-
-    base_params = filter(lambda p: id(p) not in ignored_params, net.parameters())
-
-    optimizer1 = optim.SGD([
-        {'params': base_params, 'lr': 0.1 * args.lr},
-        {'params': net.bottleneck.parameters(), 'lr': args.lr},
-        {'params': net.classifier.parameters(), 'lr': args.lr},
-        {'params': net.cmalign.maskFc.parameters(), 'lr': args.lr}],
-        weight_decay=5e-4, momentum=0.9, nesterov=True)
-    optimizer2 = optim.Adam(
-        [{'params': net.clip.parameters(), 'lr': 5e-5}],
-        betas=(0.9,0.98),eps=1e-6,weight_decay=0.2)
-
-# exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
-def adjust_learning_rate(optimizer, epoch):
-    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    if epoch < 10:
-        lr = args.lr * (epoch + 1) / 10
-    elif epoch >= 10 and epoch < 20:
-        lr = args.lr
-    elif epoch >= 20 and epoch < 50:
-        lr = args.lr * 0.1
-    elif epoch >= 50:
-        lr = args.lr * 0.01
-
-    optimizer.param_groups[0]['lr'] = 0.1 * lr
-    for i in range(len(optimizer.param_groups) - 1):
-        optimizer.param_groups[i + 1]['lr'] = lr
-
-    return lr
+        print('==> Error: no checkpoint found at {}'.format(args.resume))
+        print("!! WARNING: Running with Random Weights !!")
+else:
+    print("=======================================================================")
+    print("!! WARNING: You did not specify --resume. Running with Random Weights !!")
+    print("!! Expect very low accuracy (approx 1%). Please check your args.      !!")
+    print("=======================================================================")
 
 def test(epoch):
     # switch to evaluation mode
@@ -303,15 +274,24 @@ def test(epoch):
     cmc, mAP, mINP      = eval(-distmat, query_label, gall_label)
     print('Evaluation Time:\t {:.3f}'.format(time.time() - start))
 
-    writer.add_scalar('rank1', cmc[0], epoch)
-    writer.add_scalar('mAP', mAP, epoch)
-    writer.add_scalar('mINP', mINP, epoch)
+    # Check if writer is available (might be closed)
+    try:
+        writer.add_scalar('rank1', cmc[0], epoch)
+        writer.add_scalar('mAP', mAP, epoch)
+        writer.add_scalar('mINP', mINP, epoch)
+    except:
+        pass
+        
     return cmc, mAP, mINP
 
 if __name__ == '__main__':
+    # Try to get epoch from checkpoint, otherwise default to 0
+    try:
+        start_epoch = checkpoint['epoch']
+    except NameError:
+        start_epoch = 0
+
     cmc, mAP, mINP = test(start_epoch)
 
     print('POOL:   Rank-1: {:.2%} | Rank-5: {:.2%} | Rank-10: {:.2%}| Rank-20: {:.2%}| mAP: {:.2%}| mINP: {:.2%}'.format(
                 cmc[0], cmc[4], cmc[9], cmc[19], mAP, mINP))
-    print('Best Epoch [{}]'.format(start_epoch))
-
