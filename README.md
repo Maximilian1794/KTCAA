@@ -11,6 +11,8 @@
 <img src="./pic/pip.png" alt="teaser"></image>
 </div>
 
+## [Paper](Paper/Paper.pdf) and [Supplemental Material](Paper/Appendix.pdf)
+
 ## Dataset
 
 Download <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid">MaSk1K dataset</a> (Short for <u>Ma</u>rket-<u>Sk</u>etch-<u>1K</u>), <a href="https://zheng-lab-anu.github.io/Project/project_reid.html">Market1501 dataset</a>, and <a href="https://github.com/vana77/Market-1501_Attribute.git">Market1501 attributes</a>. Put MaSk1K and Market1501 separately into your \<data_path\>.
