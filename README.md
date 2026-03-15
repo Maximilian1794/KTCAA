@@ -75,7 +75,7 @@ python test_topk.py
 
 
 ## Acknowledgements
-Our code is based on ssreid (subjectivity-sketch-reid) <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid"> and provides a comparison with ssreid </a> using <a href="https://github.com/openai/CLIP.git">CLIP</a>. 
+Our code is based on <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid">ssreid (subjectivity-sketch-reid) </a> and provides a comparison with ssreid  using <a href="https://github.com/openai/CLIP.git">CLIP</a>. 
 
 ## Citation
 If you find our work helpful, please consider citing our work using the following bibtex.
