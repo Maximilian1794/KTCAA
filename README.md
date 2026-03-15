@@ -11,7 +11,6 @@
 <img src="./pic/pip.png" alt="teaser"></image>
 </div>
 
-## [Paper](Paper/Paper.pdf) and [Supplemental Material](Paper/Appendix.pdf)
 
 ## Dataset
 
