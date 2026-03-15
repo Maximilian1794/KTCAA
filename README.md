@@ -64,7 +64,7 @@ python test.py \
  - `<model_filename>` should be the filename of your trained model.
  - `[--test_mq]` argument is used for enabling multi-query during testing.
 
-### Visualization
+### Visualization and Results
 ```python
 python test_topk.py 
 ```
