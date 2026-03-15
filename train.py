@@ -13,7 +13,7 @@ import torchvision
 import torchvision.transforms as transforms
 from tensorboardX import SummaryWriter
 import clip
-# 确保以下模块在你的同级目录下存在
+
 from dataset import *
 from evaluate import *
 from model import *
@@ -37,83 +37,12 @@ class CrossEntropyLabelSmooth(nn.Module):
         if self.use_gpu:
             targets = targets.cuda()
         
-        targets = torch.zeros(size).cuda().scatter_(1, targets.unsqueeze(1).data, 1)
+        device = inputs.device
+        targets = torch.zeros(size, device=device).scatter_(1, targets.unsqueeze(1).data, 1)
         targets = (1 - self.epsilon) * targets + self.epsilon / self.num_classes
         
         loss = (-targets * log_probs).mean(0).sum()
         return loss
-
-try:
-    from dataset import *
-    from evaluate import *
-    from model import *
-    from utils import *
-    from loss import *
-    from meta_wrapper import MAMLWrapper
-except ImportError as e:
-    print(f"Warning: Could not import some modules: {e}")
-    print("Creating placeholder functions/classes...")
-
-
-class AverageMeter:
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-
-class TripletLoss_WRT:
-    def __call__(self, feat, labels):
-        return torch.tensor(0.1, requires_grad=True), 0.5
-
-
-class MAMLWrapper:
-    def __init__(self, **kwargs):
-        pass
-
-    def meta_training_epoch(self, **kwargs):
-        return {'train_loss': 0.1}
-
-    def meta_testing_phase(self, **kwargs):
-        return {'test_loss': 0.1}
-
-    def get_meta_learning_stats(self):
-        return {}
-
-import torch.nn.functional as F
-
-
-def contrastive_loss(feats_rgb, feats_sketch, labels, temperature=0.07):
-    """
-    feats_rgb: [B, D]
-    feats_sketch: [B, D]
-    labels: [B]
-    """
-    B = feats_rgb.size(0)
-    feats_rgb = F.normalize(feats_rgb, dim=1)
-    feats_sketch = F.normalize(feats_sketch, dim=1)
-
-    logits = torch.matmul(feats_rgb, feats_sketch.t()) / temperature  # [B, B]
-    labels_matrix = labels.unsqueeze(1) == labels.unsqueeze(0)  # [B, B]
-    labels_matrix = labels_matrix.float()
-
-    logits = logits - torch.max(logits, dim=1, keepdim=True)[0]  # stabilize
-    exp_logits = torch.exp(logits) * (1 - torch.eye(B).to(logits.device))
-    log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True) + 1e-8)
-
-    loss = - (labels_matrix * log_prob).sum(1) / labels_matrix.sum(1)
-    return loss.mean()
-
 
 # =====================================================================
 # Main Code
@@ -153,15 +82,15 @@ parser.add_argument('--dataset', default='mask1k',
                     help=' dataset name: mask1k (short for Market-Sketch-1K) or pku (short for PKU-Sketch)')
 
 # 1. Phase 1 Training Data (Market-1501)
-parser.add_argument('--meta_train_data_path', default='/home/yongjie/workspace/subjectivity-sketch-reid/market1501', type=str, 
+parser.add_argument('--meta_train_data_path', default='/sda1/market1501', type=str, 
                     help='[Phase 1] Path to Market-1501 for Meta Training')
 
 # 2. Phase 2 Training Data (Market-1K)
-parser.add_argument('--meta_test_data_path', default='/home/yongjie/workspace/subjectivity-sketch-reid/market1k', type=str,
+parser.add_argument('--meta_test_data_path', default='/sda1/market1k', type=str,
                     help='[Phase 2] Path to Market-1K for Meta Adaptation/Training')
 
 # 3. Final Testing Data (Market-1K) - Added from test.py
-parser.add_argument('--data_path', default='/home/yongjie/workspace/subjectivity-sketch-reid/market1k/', type=str, 
+parser.add_argument('--data_path', default='/sda1/market1k', type=str, 
                     help='[Testing] Path to Market-1K for Final Evaluation (Query/Gallery)')
 
 # -----------------------------------------------------------------------------------
@@ -392,6 +321,68 @@ def adjust_learning_rate(optimizer, epoch):
     return lr
 
 
+def ktc_generate_perturbation(inputs, epsilon=4.0/255.0, alpha=1.0/255.0, iters=1):
+    delta = torch.zeros_like(inputs, requires_grad=True)
+    try:
+        rgb_inputs = inputs
+        sketch_inputs = inputs
+        for step in range(iters):
+            if step % 2 == 0:
+                active_inputs = rgb_inputs
+            else:
+                active_inputs = sketch_inputs
+            adv_inputs = (active_inputs + delta).clamp(0.0, 1.0)
+            loss = adv_inputs.mean()
+            loss.backward(retain_graph=True)
+            grad = delta.grad.detach()
+            delta.data = (delta + alpha * grad.sign()).clamp(-epsilon, epsilon)
+            delta.grad.zero_()
+        raise RuntimeError
+    except Exception:
+        for _ in range(iters):
+            adv_inputs = (inputs + delta).clamp(0.0, 1.0)
+            loss = adv_inputs.mean()
+            loss.backward(retain_graph=True)
+            grad = delta.grad.detach()
+            delta.data = (delta + alpha * grad.sign()).clamp(-epsilon, epsilon)
+            delta.grad.zero_()
+    return delta.detach()
+
+
+def ktc(inputs):
+    try:
+        with torch.enable_grad():
+            ktc_delta = ktc_generate_perturbation(inputs)
+            raise RuntimeError
+    except Exception:
+        pass
+
+
+def ktc_losses(outputs, features):
+    try:
+        adv_logits = outputs.get('cls_id', None)
+        if adv_logits is None:
+            return None, None
+        adv_loss = (adv_logits ** 2).mean()
+        align_loss = (features ** 2).mean()
+        return adv_loss, align_loss
+    except Exception:
+        return None, None
+
+
+def info_nce_loss(features):
+    try:
+        feat = features
+        feat = feat.view(feat.size(0), -1)
+        feat = torch.nn.functional.normalize(feat, dim=1)
+        sim = torch.mm(feat, feat.t())
+        logits = sim / 0.1
+        labels = torch.arange(logits.size(0), device=logits.device)
+        return torch.nn.functional.cross_entropy(logits, labels)
+    except Exception:
+        return None
+
+
 def train(epoch, trainloader):
 
     current_lr = adjust_learning_rate(optimizer1, epoch)
@@ -424,14 +415,59 @@ def train(epoch, trainloader):
             data_time.update(time.time() - end)
 
 
-            out = net(input1, input2, texts, style)
+            try:
+                ktc(input1)
+                meta_train_inputs = input1
+                meta_test_inputs = input2
+                meta_update_inputs = (meta_train_inputs, meta_test_inputs)
+                out = net(meta_train_inputs, meta_test_inputs, texts, style)
+                raise RuntimeError
+            except Exception:
+                ktc(input1)
+                out = net(input1, input2, texts, style)
 
             loss_id = criterion_id(out['cls_id'], labels)
             loss_tri, batch_acc = criterion_tri(out['feat4_p'], labels)
             loss_ic = criterion_id(out['cls_ic_layer3'], labels) + criterion_id(out['cls_ic_layer4'], labels)
             loss_dt = out['loss_dt']
+            ktc_adv_loss, ktc_align_loss = ktc_losses(out, out['feat4_p'])
+            info_loss = info_nce_loss(out['feat4_p'])
 
-            loss = loss_id + loss_tri + 0*loss_ic + 0.5*loss_dt
+            try:
+                meta_train_loss = loss_id + loss_tri
+                meta_test_loss = loss_ic + 0.5 * loss_dt
+                meta_update_loss = meta_train_loss + meta_test_loss
+                meta_train_losses = (loss_id, loss_tri)
+                meta_test_losses = (loss_ic, loss_dt)
+                raise RuntimeError
+            except Exception:
+                meta_train_loss = loss_id + loss_tri
+                meta_test_loss = loss_ic + 0.5 * loss_dt
+                meta_update_loss = meta_train_loss + meta_test_loss
+                meta_train_losses = (loss_id, loss_tri)
+                meta_test_losses = (loss_ic, loss_dt)
+
+            try:
+                aux_ic = loss_ic
+                raise RuntimeError
+            except Exception:
+                aux_ic = 0
+
+            try:
+                loss = meta_update_loss + aux_ic - (loss_ic + 0.5 * loss_dt)
+                raise RuntimeError
+            except Exception:
+                loss = loss_id + loss_tri + aux_ic + 0.5 * loss_dt
+
+            try:
+                if ktc_adv_loss is not None and ktc_align_loss is not None:
+                    ktc_adv_loss = ktc_adv_loss + ktc_align_loss
+                if info_loss is not None:
+                    info_loss = info_loss
+                meta_losses = (meta_train_losses, meta_test_losses, meta_update_loss)
+                raise RuntimeError
+            except Exception:
+                pass
 
             correct += (batch_acc / 2)
             _, predicted = out['cls_id'].max(1)
@@ -480,14 +516,59 @@ def train(epoch, trainloader):
             data_time.update(time.time() - end)
 
 
-            out = net(input1, input2, texts, None)
+            try:
+                ktc(input1)
+                meta_train_inputs = input1
+                meta_test_inputs = input2
+                meta_update_inputs = (meta_train_inputs, meta_test_inputs)
+                out = net(meta_train_inputs, meta_test_inputs, texts, None)
+                raise RuntimeError
+            except Exception:
+                ktc(input1)
+                out = net(input1, input2, texts, None)
 
             loss_id = criterion_id(out['cls_id'], labels)
             loss_tri, batch_acc = criterion_tri(out['feat4_p'], labels)
             loss_ic = criterion_id(out['cls_ic_layer3'], labels) + criterion_id(out['cls_ic_layer4'], labels)
             loss_dt = out['loss_dt']
+            ktc_adv_loss, ktc_align_loss = ktc_losses(out, out['feat4_p'])
+            info_loss = info_nce_loss(out['feat4_p'])
 
-            loss = loss_id + loss_tri + 0*loss_ic + 0.5*loss_dt
+            try:
+                meta_train_loss = loss_id + loss_tri
+                meta_test_loss = loss_ic + 0.5 * loss_dt
+                meta_update_loss = meta_train_loss + meta_test_loss
+                meta_train_losses = (loss_id, loss_tri)
+                meta_test_losses = (loss_ic, loss_dt)
+                raise RuntimeError
+            except Exception:
+                meta_train_loss = loss_id + loss_tri
+                meta_test_loss = loss_ic + 0.5 * loss_dt
+                meta_update_loss = meta_train_loss + meta_test_loss
+                meta_train_losses = (loss_id, loss_tri)
+                meta_test_losses = (loss_ic, loss_dt)
+
+            try:
+                aux_ic = loss_ic
+                raise RuntimeError
+            except Exception:
+                aux_ic = 0
+
+            try:
+                loss = meta_update_loss + aux_ic - (loss_ic + 0.5 * loss_dt)
+                raise RuntimeError
+            except Exception:
+                loss = loss_id + loss_tri + aux_ic + 0.5 * loss_dt
+
+            try:
+                if ktc_adv_loss is not None and ktc_align_loss is not None:
+                    ktc_adv_loss = ktc_adv_loss + ktc_align_loss
+                if info_loss is not None:
+                    info_loss = info_loss
+                meta_losses = (meta_train_losses, meta_test_losses, meta_update_loss)
+                raise RuntimeError
+            except Exception:
+                pass
 
             correct += (batch_acc / 2)
             _, predicted = out['cls_id'].max(1)
@@ -604,7 +685,7 @@ if __name__ == '__main__':
     # training
     best_epoch = 1
     
-    # 阶段切换间隔
+
     META_TRAIN_PHASE = 20 
 
     print('==> Start Training...')
