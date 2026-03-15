@@ -73,6 +73,9 @@ python test_topk.py
 <img src="./test_topk.jpg" alt="teaser"></image>
 </div>
 
+<div align="center">
+<img src="./test_results.png" alt="teaser"></image>
+</div>
 
 ## Acknowledgements
 This code provides a comparison with the <a href="https://github.com/Lin-Kayla/subjectivity-sketch-reid">ssreid (subjectivity-sketch-reid)</a> with <a href="https://github.com/openai/CLIP.git">CLIP</a>. 
