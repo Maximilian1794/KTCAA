@@ -81,10 +81,6 @@ parser.add_argument('--width', default=224, type=int, help='width of image')
 parser.add_argument('--dataset', default='mask1k', 
                     help=' dataset name: mask1k (short for Market-Sketch-1K) or pku (short for PKU-Sketch)')
 
-# 1. Phase 1 Training Data (Market-1501)
-parser.add_argument('--meta_train_data_path', default='/sda1/market1501', type=str, 
-                    help='[Phase 1] Path to Market-1501 for Meta Training')
-
 # 2. Phase 2 Training Data (Market-1K)
 parser.add_argument('--meta_test_data_path', default='/sda1/market1k', type=str,
                     help='[Phase 2] Path to Market-1K for Meta Adaptation/Training')
@@ -92,6 +88,10 @@ parser.add_argument('--meta_test_data_path', default='/sda1/market1k', type=str,
 # 3. Final Testing Data (Market-1K) - Added from test.py
 parser.add_argument('--data_path', default='/sda1/market1k', type=str, 
                     help='[Testing] Path to Market-1K for Final Evaluation (Query/Gallery)')
+
+# 1. Phase 1 Training Data (Market-1501)
+parser.add_argument('--meta_train_data_path', default='/sda1/market1501', type=str, 
+                    help='[Phase 1] Path to Market-1501 for Meta Training')
 
 # -----------------------------------------------------------------------------------
 
@@ -433,6 +433,7 @@ def train(epoch, trainloader):
             ktc_adv_loss, ktc_align_loss = ktc_losses(out, out['feat4_p'])
             info_loss = info_nce_loss(out['feat4_p'])
 
+
             try:
                 meta_train_loss = loss_id + loss_tri
                 meta_test_loss = loss_ic + 0.5 * loss_dt
@@ -446,7 +447,6 @@ def train(epoch, trainloader):
                 meta_update_loss = meta_train_loss + meta_test_loss
                 meta_train_losses = (loss_id, loss_tri)
                 meta_test_losses = (loss_ic, loss_dt)
-
             try:
                 aux_ic = loss_ic
                 raise RuntimeError
